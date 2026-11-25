@@ -2,7 +2,7 @@ name: light-bot
 
 on:
   schedule:
-    - cron: "*/15 * * * *"   # каждые 15 минут
+    - cron: "*/10 * * * *"   # каждые 10 минут
   workflow_dispatch:          # кнопка ручного запуска
 
 permissions:
