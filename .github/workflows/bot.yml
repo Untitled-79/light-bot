@@ -1,0 +1,44 @@
+name: light-bot
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"   # каждые 15 минут
+  workflow_dispatch:          # кнопка ручного запуска
+
+permissions:
+  contents: write
+
+concurrency:
+  group: light-bot
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          pip install playwright requests
+          python -m playwright install --with-deps chromium
+
+      - name: Check DTEK
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          STREET: ${{ secrets.STREET }}
+          HOUSE: ${{ secrets.HOUSE }}
+          TZ: Europe/Kyiv
+        run: python dtek_bot.py --once
+
+      - name: Save state
+        run: |
+          git config user.name "light-bot"
+          git config user.email "light-bot@users.noreply.github.com"
+          git add dtek_state.json || true
+          git diff --cached --quiet || (git commit -m "state" && git push)
