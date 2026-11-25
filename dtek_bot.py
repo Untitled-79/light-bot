@@ -334,6 +334,8 @@ def upcoming_switches(fact, group, now_dt):
 
 # ---------- статус сейчас ----------
 
+STATUS_ON = "✨ Кажуть, що світло вже є. Перевіряємо."
+
 def status_text(info):
     if info.get("type") or info.get("sub_type") or info.get("start_date"):
         lines = ["🔴 <b>Світла немає</b>"]
@@ -389,7 +391,7 @@ def check(test=False):
 
     sk = status_key(info)
     if test or state.get("status") != sk:
-        messages.append(f"{head}\n{status_text(info)}")
+        messages.append(f"{head}\n{status_text(info)}" if has_outage(info) else STATUS_ON)
         state["status"] = sk
 
     emergency = is_emergency(info)
@@ -450,7 +452,7 @@ def check(test=False):
             print("[картинка]", c[2], "\n")
 
     if messages:
-        send("\n\n".join(messages) + (f"\n\n<i>Дані ДТЕК: {info['_updated']}</i>" if info.get("_updated") else ""))
+        send("\n\n".join(messages) + (f"\n\n<i>Дані ДТЕК: {info['_updated']}</i>" if info.get("_updated") and has_outage(info) else ""))
     for w in warnings:
         send(w)
     if cards:
