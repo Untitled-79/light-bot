@@ -207,6 +207,74 @@ def detect_group(info):
     return reason[0] if reason else None
 
 
+# ---------- картинка с графиком ----------
+
+NAVY = "#172741"
+BOLT_ON = ('<svg viewBox="0 0 24 24" width="17" height="17"><path d="M13.5 2 4.5 13.6h6.6L10 22l9-11.8h-6.7L13.5 2z" '
+           'fill="#F5B731"/></svg>')
+BOLT_OFF = ('<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="{c}" stroke-width="1.7" '
+            'stroke-linejoin="round" stroke-linecap="round"><path d="M13.5 2 4.5 13.6h6.6L10 22l9-11.8h-6.7L13.5 2z"/>'
+            '<path d="M4 3.5 20 20.5"/></svg>')
+
+CARD_CSS = """
+@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400&display=block');
+body { margin: 0; background: #fff; }
+.grid { display: grid; grid-template-columns: repeat(4, 104px); gap: 11px; padding: 22px 21px;
+        width: max-content; background: #fff; font-family: Roboto, Arial, sans-serif; }
+.tile { position: relative; height: 59px; border-radius: 8px; border: 1.5px solid #E6E6E6;
+        box-sizing: border-box; overflow: hidden; background: #fff; }
+.tile.off { background: NAVY; border-color: NAVY; }
+.tile.maybe { background: #DCE3EE; border-color: #DCE3EE; }
+.tile.now { border: 2px solid #1A8CFF; box-shadow: 0 0 0 1.5px #1A8CFF; }
+.fill { position: absolute; top: 1.5px; bottom: 1.5px; background: NAVY; }
+.fill.m { background: #C9D3E2; }
+.fill.l { left: 1.5px; width: calc(50% - 1.5px); border-radius: 6px 0 0 6px; }
+.fill.r { right: 1.5px; width: calc(50% - 1.5px); border-radius: 0 6px 6px 0; }
+.label { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+         gap: 4px; font-size: 15.5px; color: #333; letter-spacing: .2px; }
+.tile.off .label { color: #fff; }
+.tile.maybe .label { color: NAVY; }
+.label.w { color: #fff; }
+""".replace("NAVY", NAVY)
+
+
+def tile_html(hour, value, now=False):
+    v = str(value).lower()
+    hh = f"{hour:02d}:00"
+    cls = "tile" + (" now" if now else "")
+    if v == "no":
+        return f'<div class="{cls} off"><div class="label">{BOLT_OFF.format(c="#fff")}{hh}</div></div>'
+    if v == "maybe":
+        return f'<div class="{cls} maybe"><div class="label">{BOLT_OFF.format(c=NAVY)}{hh}</div></div>'
+    if v in ("first", "second", "mfirst", "msecond"):
+        side = "l" if v in ("first", "mfirst") else "r"
+        m = " m" if v.startswith("m") else ""
+        clip = "inset(0 50% 0 0)" if side == "l" else "inset(0 0 0 50%)"
+        white = "" if m else f'<div class="label w" style="clip-path:{clip}">{hh}</div>'
+        return (f'<div class="{cls}"><div class="fill {side}{m}"></div>'
+                f'<div class="label">{hh}</div>{white}</div>')
+    return f'<div class="{cls}"><div class="label">{BOLT_ON}{hh}</div></div>'
+
+
+def card_html(day, now_hour=None):
+    tiles = "".join(tile_html(h - 1, day.get(str(h), "yes"), now=(h - 1 == now_hour)) for h in range(1, 25))
+    return f'<html><head><meta charset="utf-8"><style>{CARD_CSS}</style></head><body><div class="grid">{tiles}</div></body></html>'
+
+
+def render_cards(cards):
+    """cards: [(day, now_hour)] -> [png bytes]"""
+    out = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(device_scale_factor=2)
+        for day, now_hour in cards:
+            page.set_content(card_html(day, now_hour), wait_until="networkidle")
+            page.evaluate("document.fonts.ready")
+            out.append(page.locator(".grid").screenshot())
+        browser.close()
+    return out
+
+
 # ---------- статус сейчас ----------
 
 def status_text(info):
@@ -237,6 +305,14 @@ def send(text):
         log(f"Ошибка Telegram: {r.text[:300]}")
 
 
+def send_photo(png, caption):
+    r = requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendPhoto",
+                      data={"chat_id": TG_CHAT_ID, "caption": caption, "parse_mode": "HTML"},
+                      files={"photo": ("grafik.png", png, "image/png")}, timeout=60)
+    if not r.ok:
+        log(f"Ошибка Telegram (фото): {r.text[:300]}")
+
+
 # ---------- основной цикл ----------
 
 def load_state():
@@ -252,6 +328,7 @@ def check(test=False):
     state = load_state()
     head = f"📍 {STREET}, {HOUSE}"
     messages = []
+    cards = []  # (day, now_hour, caption)
 
     sk = status_key(info)
     if test or state.get("status") != sk:
@@ -269,7 +346,7 @@ def check(test=False):
                 title = ("Графік на сьогодні " if n == 0 else "Графік на завтра ") + date
                 if state.get(key) and not test:
                     title += " (оновлено)"
-                messages.append(schedule_text(day, title))
+                cards.append((day, now().hour if n == 0 else None, f"{head}\n🗓 <b>{title}</b>"))
                 state[key] = sig
     else:
         log("Группа графика не определена: поставь GROUP вручную в настройках.")
@@ -285,10 +362,16 @@ def check(test=False):
         print("\n--- СООБЩЕНИЯ ---")
         for m in messages:
             print(m, "\n")
+        for c in cards:
+            print("[картинка]", c[2], "\n")
 
     if messages:
         send("\n\n".join(messages) + (f"\n\n<i>Дані ДТЕК: {info['_updated']}</i>" if info.get("_updated") else ""))
-        log(f"Отправлено сообщений: {len(messages)}")
+    if cards:
+        for png, (_, _, caption) in zip(render_cards([(d, h) for d, h, _ in cards]), cards):
+            send_photo(png, caption)
+    if messages or cards:
+        log(f"Отправлено: текст {len(messages)}, картинок {len(cards)}")
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
 
 
