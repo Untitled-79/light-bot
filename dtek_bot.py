@@ -385,7 +385,7 @@ def check(test=False):
                 title = ("графік на сьогодні " if n == 0 else "графік на завтра ") + date
                 if state.get(key) and not test:
                     title += " (оновлено)"
-                cards.append((day, None, f"👋 Друзі,\n🔅 ось {title}"))
+                cards.append((day, None, f"👋 Любі друзі,\n🔅 ось {title}"))
                 state[key] = sig
     else:
         log("Группа графика не определена: поставь GROUP вручную в настройках.")
