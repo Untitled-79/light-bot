@@ -14,7 +14,7 @@ import os
 import re
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import requests
@@ -302,6 +302,36 @@ def is_emergency(info):
     return flags.get("showTableFact") is False and has_outage(info)
 
 
+# ---------- предупреждения за полчаса ----------
+
+WARN_OFF = "🍒 Дівульки, красотульки, за півгодинки може зникнути світло, готуємось."
+WARN_ON = "🔆 Не сумуємо, чекаємо, за півгодинки обіцяли дати світло."
+WARN_WINDOW_MIN = 40  # предупреждать, если до события осталось не больше стольких минут
+
+
+def day_start(date):
+    d = datetime.strptime(date, "%d.%m.%Y")
+    return d.replace(tzinfo=KYIV) if KYIV else d
+
+
+def upcoming_switches(fact, group, now_dt):
+    """[(время, 'off' | 'on')] переходов по графику, до которых осталось 0..WARN_WINDOW_MIN минут."""
+    seq = []
+    for date, day_data in days_of(fact)[:2]:
+        day = day_data.get(group)
+        if not day:
+            break
+        start = day_start(date)
+        for i, s in enumerate(half_hour_slots(day)):
+            seq.append((start + timedelta(minutes=30 * i), s == "off"))
+    out = []
+    for (_, was_off), (when, is_off) in zip(seq, seq[1:]):
+        left = (when - now_dt).total_seconds()
+        if was_off != is_off and 0 < left <= WARN_WINDOW_MIN * 60:
+            out.append((when, "off" if is_off else "on"))
+    return out
+
+
 # ---------- статус сейчас ----------
 
 def status_text(info):
@@ -390,9 +420,22 @@ def check(test=False):
     else:
         log("Группа графика не определена: поставь GROUP вручную в настройках.")
 
+    warnings = []
+    if group and not emergency:
+        for when, kind in upcoming_switches(fact, group, now()):
+            key = f"warn_{when:%Y%m%d%H%M}_{kind}"
+            if state.get(key):
+                continue
+            state[key] = 1
+            if kind == "off" and has_outage(info):
+                continue  # света уже нет, предупреждать не о чем
+            warnings.append(WARN_OFF if kind == "off" else WARN_ON)
+
     # чистим старые даты
     keep = {"sched_" + d for d, _ in days_of(fact)}
     state = {k: v for k, v in state.items() if not k.startswith("sched_") or k in keep}
+    days_keep = {datetime.strptime(d, "%d.%m.%Y").strftime("%Y%m%d") for d, _ in days_of(fact)}
+    state = {k: v for k, v in state.items() if not k.startswith("warn_") or k[5:13] in days_keep}
     state["errors"] = 0
 
     if test:
@@ -401,16 +444,20 @@ def check(test=False):
         print("\n--- СООБЩЕНИЯ ---")
         for m in messages:
             print(m, "\n")
+        for w in warnings:
+            print("[предупреждение]", w, "\n")
         for c in cards:
             print("[картинка]", c[2], "\n")
 
     if messages:
         send("\n\n".join(messages) + (f"\n\n<i>Дані ДТЕК: {info['_updated']}</i>" if info.get("_updated") else ""))
+    for w in warnings:
+        send(w)
     if cards:
         for png, (_, _, caption) in zip(render_cards([(d, h) for d, h, _ in cards]), cards):
             send_photo(png, caption)
-    if messages or cards:
-        log(f"Отправлено: текст {len(messages)}, картинок {len(cards)}")
+    if messages or cards or warnings:
+        log(f"Отправлено: текст {len(messages)}, предупреждений {len(warnings)}, картинок {len(cards)}")
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
 
 
