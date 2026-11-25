@@ -62,6 +62,11 @@ JS_FACT = """() => {
   return null;
 }"""
 
+JS_FLAGS = """() => {
+  try { return {showTableFact: DisconSchedule.showTableFact, showCurSchedule: DisconSchedule.showCurSchedule}; }
+  catch (e) { return {}; }
+}"""
+
 JS_AJAX = """async ([street, update]) => {
   const token = (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
   const body = new URLSearchParams();
@@ -98,6 +103,7 @@ def fetch_site():
             if m:
                 fact = json.loads(m.group(1))
 
+        flags = page.evaluate(JS_FLAGS) or {}
         update = (fact or {}).get("update", "")
         raw = page.evaluate(JS_AJAX, [STREET, update])
         browser.close()
@@ -117,6 +123,7 @@ def fetch_site():
     if info is None:
         raise RuntimeError(f"Дом {HOUSE} не найден. Есть, например: {list(houses)[:15]}")
     info["_updated"] = resp.get("updateTimestamp", "")
+    info["_flags"] = flags
     return fact, info
 
 
@@ -235,6 +242,7 @@ body { margin: 0; background: #fff; }
 .tile.off .label { color: #fff; }
 .tile.maybe .label { color: NAVY; }
 .label.w { color: #fff; }
+.tile.gray { background: #E7E7E9; border-color: #E7E7E9; }
 """.replace("NAVY", NAVY)
 
 
@@ -242,6 +250,8 @@ def tile_html(hour, value, now=False):
     v = str(value).lower()
     hh = f"{hour:02d}:00"
     cls = "tile" + (" now" if now else "")
+    if v == "gray":
+        return f'<div class="{cls} gray"><div class="label">{hh}</div></div>'
     if v == "no":
         return f'<div class="{cls} off"><div class="label">{BOLT_OFF.format(c="#fff")}{hh}</div></div>'
     if v == "maybe":
@@ -273,6 +283,23 @@ def render_cards(cards):
             out.append(page.locator(".grid").screenshot())
         browser.close()
     return out
+
+
+# ---------- экстренные отключения ----------
+
+GRAY_DAY = {str(h): "gray" for h in range(1, 25)}
+
+
+def has_outage(info):
+    return bool(info.get("type") or info.get("sub_type") or info.get("start_date"))
+
+
+def is_emergency(info):
+    if "екстрен" in str(info.get("sub_type", "")).lower():
+        return True
+    flags = info.get("_flags") or {}
+    # ДТЭК скрыл таблицы графиков, а света по адресу нет
+    return flags.get("showTableFact") is False and has_outage(info)
 
 
 # ---------- статус сейчас ----------
@@ -335,12 +362,24 @@ def check(test=False):
         messages.append(f"{head}\n{status_text(info)}")
         state["status"] = sk
 
+    emergency = is_emergency(info)
+    days = days_of(fact)
+    today_key = "sched_" + now().strftime("%d.%m.%Y")
+    if emergency:
+        if test or not state.get("emergency"):
+            cards.append((GRAY_DAY, None, "⚠️ Діють екстрені відключення"))
+    elif state.get("emergency"):
+        state.pop(today_key, None)  # экстренные закончились: снова прислать обычный график на сегодня
+    state["emergency"] = emergency
+
     if group:
-        for n, (date, day_data) in enumerate(days_of(fact)[:2]):
+        for n, (date, day_data) in enumerate(days[:2]):
             day = day_data.get(group)
             if not day:
                 continue
             key = "sched_" + date
+            if emergency and key == today_key:
+                continue
             sig = json.dumps(day, sort_keys=True)
             if test or state.get(key) != sig:
                 title = ("графік на сьогодні " if n == 0 else "графік на завтра ") + date
