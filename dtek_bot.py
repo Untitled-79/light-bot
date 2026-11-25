@@ -343,10 +343,10 @@ def check(test=False):
             key = "sched_" + date
             sig = json.dumps(day, sort_keys=True)
             if test or state.get(key) != sig:
-                title = ("Графік на сьогодні " if n == 0 else "Графік на завтра ") + date
+                title = ("графік на сьогодні " if n == 0 else "графік на завтра ") + date
                 if state.get(key) and not test:
                     title += " (оновлено)"
-                cards.append((day, None, f"{head}\n🗓 <b>{title}</b>"))
+                cards.append((day, None, f"👋 Друзі,\n🔅 ось {title}"))
                 state[key] = sig
     else:
         log("Группа графика не определена: поставь GROUP вручную в настройках.")
