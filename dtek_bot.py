@@ -391,7 +391,8 @@ def check(test=False):
 
     sk = status_key(info)
     if test or state.get("status") != sk:
-        messages.append(f"{head}\n{status_text(info)}" if has_outage(info) else STATUS_ON)
+        if not has_outage(info):
+            messages.append(STATUS_ON)  # о пропаже света не пишем
         state["status"] = sk
 
     emergency = is_emergency(info)
