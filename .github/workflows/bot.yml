@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "*/10 * * * *"   # каждые 10 минут
   workflow_dispatch:          # кнопка ручного запуска
+    inputs:
+      demo:
+        description: "Тест: отправить все виды сообщений"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -34,7 +39,7 @@ jobs:
           STREET: ${{ secrets.STREET }}
           HOUSE: ${{ secrets.HOUSE }}
           TZ: Europe/Kyiv
-        run: python dtek_bot.py --once
+        run: python dtek_bot.py ${{ inputs.demo && '--demo' || '--once' }}
 
       - name: Save state
         run: |
