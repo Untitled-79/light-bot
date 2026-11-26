@@ -464,7 +464,31 @@ def check(test=False):
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
 
 
+def demo():
+    """Тест: отправить в группу все виды сообщений на текущих данных. Память бота не меняется."""
+    fact, info = fetch_site()
+    group = detect_group(info)
+    days = days_of(fact)
+    cards = []
+    for n, (date, day_data) in enumerate(days[:2]):
+        day = day_data.get(group) if group else None
+        if day:
+            title = ("графік на сьогодні " if n == 0 else "графік на завтра ") + date
+            cards.append((day, None, f"👋 Любі друзі,\n🔅 ось {title}"))
+            if n == 0:
+                cards.append((day, None, f"👋 Любі друзі,\n🔅 ось {title} (оновлено)"))
+    cards.append((GRAY_DAY, None, "⚠️ Діють екстрені відключення"))
+    for png, (_, _, caption) in zip(render_cards([(d, h) for d, h, _ in cards]), cards):
+        send_photo(png, caption)
+    for text in (WARN_OFF, WARN_ON, STATUS_ON, "⚠️ Бот не може отримати дані з сайту ДТЕК."):
+        send(text)
+    log(f"Тест: отправлено картинок {len(cards)}, текстов 4")
+
+
 def main():
+    if "--demo" in sys.argv:
+        demo()
+        return
     if "--test" in sys.argv:
         check(test=True)
         return
